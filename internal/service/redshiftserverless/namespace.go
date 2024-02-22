@@ -89,6 +89,10 @@ func ResourceNamespace() *schema.Resource {
 					ValidateFunc: validation.StringInSlice(redshiftserverless.LogExport_Values(), false),
 				},
 			},
+			"manage_admin_password": {
+				Type:     schema.TypeBool,
+				Optional: true,
+			},
 			"namespace_id": {
 				Type:     schema.TypeString,
 				Computed: true,
@@ -96,6 +100,29 @@ func ResourceNamespace() *schema.Resource {
 			"namespace_name": {
 				Type:     schema.TypeString,
 				Required: true,
+				ForceNew: true,
+			},
+			"owner_account": {
+				Type:         schema.TypeString,
+				Optional:     true,
+				ValidateFunc: verify.ValidAccountID,
+			},
+			"snapshot_arn": {
+				Type:          schema.TypeString,
+				Optional:      true,
+				ForceNew:      true,
+				ValidateFunc:  verify.ValidARN,
+				ConflictsWith: []string{"snapshot_name"},
+			},
+			"snapshot_name": {
+				Type:          schema.TypeString,
+				Optional:      true,
+				ForceNew:      true,
+				ConflictsWith: []string{"snapshot_arn"},
+			},
+			"workgroup_name": {
+				Type:     schema.TypeString,
+				Optional: true,
 				ForceNew: true,
 			},
 			names.AttrTags:    tftags.TagsSchema(),
@@ -111,9 +138,21 @@ func resourceNamespaceCreate(ctx context.Context, d *schema.ResourceData, meta i
 	conn := meta.(*conns.AWSClient).RedshiftServerlessConn(ctx)
 
 	name := d.Get("namespace_name").(string)
+	inputR := &redshiftserverless.RestoreFromSnapshotInput{
+		NamespaceName: aws.String(name),
+		WorkgroupName: aws.String(d.Get("workgroup_name").(string)),
+	}
 	input := &redshiftserverless.CreateNamespaceInput{
 		NamespaceName: aws.String(name),
 		Tags:          getTagsIn(ctx),
+	}
+
+	if v, ok := d.GetOk("snapshot_arn"); ok {
+		inputR.SnapshotArn = aws.String(v.(string))
+	}
+
+	if v, ok := d.GetOk("snapshot_name"); ok {
+		inputR.SnapshotName = aws.String(v.(string))
 	}
 
 	if v, ok := d.GetOk("admin_user_password"); ok {
@@ -151,6 +190,26 @@ func resourceNamespaceCreate(ctx context.Context, d *schema.ResourceData, meta i
 	}
 
 	d.SetId(aws.StringValue(output.Namespace.NamespaceName))
+
+	if inputR.SnapshotArn != nil || inputR.SnapshotName != nil {
+		if _, ok := d.GetOk("workgroup_name"); !ok {
+			return sdkdiag.AppendErrorf(diags, `provider.aws: aws_redshiftserverless_namespace: %s: "workgroup_name": required field is not set`, d.Get("namespace_name").(string))
+		}
+
+		if v, ok := d.GetOk("owner_account"); ok {
+			inputR.OwnerAccount = aws.String(v.(string))
+		}
+
+		log.Printf("[DEBUG] Restoring Redshift Namespace: %s", inputR)
+		output, err := conn.RestoreFromSnapshotWithContext(ctx, inputR)
+
+		if err != nil {
+			return sdkdiag.AppendErrorf(diags, "restoring Redshift Serverless Namespace (%s) from snapshot: %s", name, err)
+		}
+
+		d.SetId(aws.StringValue(output.Namespace.NamespaceName))
+		diags = append(diags, resourceSnapshotRead(ctx, d, meta)...)
+	}
 
 	return append(diags, resourceNamespaceRead(ctx, d, meta)...)
 }

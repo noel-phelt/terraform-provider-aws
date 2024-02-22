@@ -218,6 +218,64 @@ func TestAccRedshiftServerlessNamespace_withWorkgroup(t *testing.T) {
 	})
 }
 
+func TestAccRedshifServerlessNamespace_restoreFromSnapshotArn(t *testing.T) {
+	ctx := acctest.Context(t)
+	// var v redshiftserverless.Namespace
+	resourceName := "aws_redshiftserverless_namespace.test"
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t, redshiftserverless.EndpointsID),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             testAccCheckNamespaceDestroy(ctx),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfig_restoreFromSnapshotARN(rName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckNamespaceExists(ctx, resourceName),
+					resource.TestCheckResourceAttrPair(resourceName, "snapshot_arn", "aws_redshiftserverless_snapshot.test", "arn"),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	},
+	)
+}
+
+func TestAccRedshifServerlessNamespace_restoreFromSnapshotName(t *testing.T) {
+	ctx := acctest.Context(t)
+	// var v redshiftserverless.Namespace
+	resourceName := "aws_redshiftserverless_namespace.test"
+	rName := sdkacctest.RandomWithPrefix(acctest.ResourcePrefix)
+
+	resource.ParallelTest(t, resource.TestCase{
+		PreCheck:                 func() { acctest.PreCheck(ctx, t) },
+		ErrorCheck:               acctest.ErrorCheck(t, redshiftserverless.EndpointsID),
+		ProtoV5ProviderFactories: acctest.ProtoV5ProviderFactories,
+		CheckDestroy:             testAccCheckNamespaceDestroy(ctx),
+		Steps: []resource.TestStep{
+			{
+				Config: testAccNamespaceConfig_restoreFromSnapshotName(rName),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckNamespaceExists(ctx, resourceName),
+					resource.TestCheckResourceAttrPair(resourceName, "snapshot_name", "aws_redshiftserverless_snapshot.test", "id"),
+				),
+			},
+			{
+				ResourceName:      resourceName,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+		},
+	},
+	)
+}
+
 func testAccCheckNamespaceDestroy(ctx context.Context) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		conn := acctest.Provider.Meta().(*conns.AWSClient).RedshiftServerlessConn(ctx)
@@ -359,6 +417,36 @@ resource "aws_redshiftserverless_namespace" "test" {
   namespace_name       = %[1]q
   default_iam_role_arn = aws_iam_role.test[0].arn
   iam_roles            = aws_iam_role.test[*].arn
+}
+`, rName))
+}
+
+func testAccNamespaceConfig_restoreFromSnapshotARN(rName string) string {
+	return acctest.ConfigCompose(testAccNamespaceConfig_basic(rName), fmt.Sprintf(`
+
+resource "aws_redshiftserverless_workgroup" "test" {
+  namespace_name = aws_redshiftserverless_namespace.test.namespace_name
+  workgroup_name = %[1]q
+}
+
+resource "aws_redshiftserverless_snapshot" "test" {
+  namespace_name = aws_redshiftserverless_workgroup.test.namespace_name
+  snapshot_name  = %[1]q
+}
+`, rName))
+}
+
+func testAccNamespaceConfig_restoreFromSnapshotName(rName string) string {
+	return acctest.ConfigCompose(testAccNamespaceConfig_basic(rName), fmt.Sprintf(`
+
+resource "aws_redshiftserverless_workgroup" "test" {
+  namespace_name = aws_redshiftserverless_namespace.test.namespace_name
+  workgroup_name = %[1]q
+}
+
+resource "aws_redshiftserverless_snapshot" "test" {
+  namespace_name = aws_redshiftserverless_workgroup.test.namespace_name
+  snapshot_name  = %[1]q
 }
 `, rName))
 }
